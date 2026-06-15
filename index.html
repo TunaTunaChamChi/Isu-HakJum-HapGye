@@ -160,7 +160,7 @@ async def process_file(event):
                             val_str = str(val).strip()
                             if re.match(r'^\d+(\.\d+)?$', val_str):
                                 try:
-                                    # 해당 학생의 추가 특수교과 학점 누적
+                                    # 해당 학생의 추가 특수교과 학점 누적 (오타 교정 완료)
                                     students_dict[last_student_key]["extra"] += float(val_str)
                                 except:
                                     pass
