@@ -118,7 +118,7 @@ async def process_file(event):
                 num = col_a
                 name = ""
                 
-                # 성명 탐색 (이 줄에서는 학점을 찾지 않습니다!)
+                # 성명 탐색
                 for c_idx in range(1, min(5, len(row))):
                     if pd.notna(row[c_idx]):
                         val = str(row[c_idx]).strip()
@@ -128,23 +128,18 @@ async def process_file(event):
                 student_key = (current_grade, current_class, num, name)
                 last_student_key = student_key
                 
-                # 새 학생이 등장하면 누적 학점 통을 0.0으로 셋팅
+                # 새 학생 등장 시 초기화
                 if student_key not in students_dict:
                     students_dict[student_key] = 0.0
                     
-            # 3. 오직 "이수학점합계" 행에서만 G열 값 누적 연산
+            # 3. 오직 "이수학점합계" 글자가 포함된 행에서만 G열 값 누적 (범위 제한 등 군더더기 전부 삭제)
             elif last_student_key is not None:
-                # 255 방지: "총계/총이수/개인별" 단어가 있는 행은 아예 무시
-                if "총계" in row_str or "총이수" in row_str or "개인별" in row_str:
-                    continue
-                
-                # "이수학점"과 "합계"라는 단어가 포함된 행인지 확인
-                if "이수학점" in row_str and "합계" in row_str:
+                if "이수학점합계" in row_str:
                     # G열 (파이썬 인덱스 6)에 접근
                     if len(row) > 6:
                         col_g = str(row[6]).strip() if pd.notna(row[6]) else ""
                         
-                        # G열의 값이 소수점 포함 숫자라면 무조건 더함 (52, 10 등)
+                        # G열의 값이 소수점 포함 숫자라면 무조건 누적
                         if re.match(r'^\d+(\.\d+)?$', col_g):
                             students_dict[last_student_key] += float(col_g)
 
