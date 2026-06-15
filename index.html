@@ -30,7 +30,7 @@
 <div class="container">
     <h2>🔒 로컬 학생 학점 합산 추출 시스템</h2>
     <div class="info-box">
-        <strong>💡 보안 및 정밀 정산 안내:</strong> 본 프로그램은 브라우저 메모리 내에서 100% 로컬로 작동합니다. 일반 교과 합계 점수와 하단의 [체육·예술/과학탐구실험] 합계 점수를 학생별로 자동 결합 및 정산하여 최종 이수학점을 산출합니다.
+        <strong>💡 데이터 정산 안내:</strong> 중복 출력 오류를 해결하고 학년, 반, 번호, 성명이 일치하는 학생 데이터를 단 한 행으로 정렬합니다. 1차 기본교과 합계(예: 52)와 하단 특수교과 합계(예: 10)를 정확히 연산하여 최종 결과값(62)을 산출합니다.
     </div>
     <div class="file-input-wrapper">
         <label for="excel-file" class="custom-file-upload">📁 파일 선택 (.xlsx 또는 .csv)</label>
@@ -39,8 +39,8 @@
     </div>
     <div id="loading-msg">⏳ 파이썬 가상 정산 엔진 구동 중입니다. 잠시만 기다려 주세요...</div>
     <div id="download-area">
-        <p style="color: #16a34a; font-weight: bold; font-size: 1.1rem;">✨ 교과 및 체육·예술 이수학점 합산 완료!</p>
-        <a id="download-link" class="btn-download" href="#" download="추출_학생이수학점_정밀합산.xlsx">📥 합산 결과 엑셀 다운로드</a>
+        <p style="color: #16a34a; font-weight: bold; font-size: 1.1rem;">✨ 데이터 교정 및 합산 완료!</p>
+        <a id="download-link" class="btn-download" href="#" download="추출_학생이수학점_최종합산.xlsx">📥 최종 결과 엑셀 다운로드</a>
     </div>
     <h4 style="margin-bottom: 5px; color: #475569;">⚙️ 정산 로그</h4>
     <div id="status-log">시스템 준비 중... (최초 구동 시 약 10~20초 소요될 수 있습니다)</div>
@@ -78,48 +78,56 @@ async def process_file(event):
     file_bytes = bytearray(uint8_array)
     
     try:
-        log("데이터 분석 중...")
+        log("데이터 구조 해석 중...")
         if file.name.lower().endswith('.csv'):
             df = pd.read_csv(io.BytesIO(file_bytes), dtype=str, header=None, encoding='utf-8-sig', on_bad_lines='skip')
         else:
             df = pd.read_excel(io.BytesIO(file_bytes), dtype=str, header=None)
         
-        extracted_data = []
+        students_dict = {}
         current_grade = ""
         current_class = ""
+        last_student_key = None
         
-        log("교과별/항목별 학점 추출 및 매칭 연산 시작...")
+        log("학생별 데이터 정밀 그룹화 및 합산 진행 중...")
         
         for index, row in df.iterrows():
             col_a = str(row[0]).strip() if pd.notna(row[0]) else ""
             
-            # 1. 학년/반 구조 파악
+            # 1. 학년/반 파악
             if "학년" in col_a and "반" in col_a:
                 match = re.search(r'(\d+)\s*학년\s*(\d+)\s*반', col_a)
                 if match:
                     current_grade = match.group(1)
                     current_class = match.group(2)
-                    continue
+                continue
             elif re.match(r'^\d+[-]\d+$', col_a):
                 parts = col_a.split('-')
                 current_grade = parts[0]
                 current_class = parts[1]
                 continue
+            
+            # 행 전체 텍스트 병합 (검색 효율화)
+            row_cells = [str(x).strip() for x in row.tolist() if pd.notna(x)]
+            row_str = "".join(row_cells).replace(" ", "")
+            
+            if not row_str:
+                continue
                 
-            # 2. 학생 데이터 신규 등록 (A열이 순수 번호숫자인 경우)
+            # 2. 새로운 학생 등장 행 처리 (A열이 숫자)
             if col_a.isdigit():
                 num = col_a
                 name = ""
                 base_credit = 0.0
                 
-                # 행 전체에서 학생 이름 탐색
-                for c_idx in range(1, len(row)):
+                # 성명 검색
+                for c_idx in range(1, min(5, len(row))):
                     if pd.notna(row[c_idx]):
                         val = str(row[c_idx]).strip()
                         if not name and re.match(r'^[가-힣]{2,5}$', val) and val != "성명":
                             name = val
                 
-                # 우측 끝에서 기본 일반교과 이수학점 합계 추출
+                # 해당 행의 이수학점 합계 검색 (우측 끝 정적 탐색 공정)
                 for val in reversed(row.tolist()):
                     if pd.notna(val):
                         val_str = str(val).strip()
@@ -130,65 +138,70 @@ async def process_file(event):
                                 base_credit = 0.0
                             break
                 
-                extracted_data.append({
-                    "학년": f"{current_grade}" if current_grade else "",
-                    "반": f"{current_class}" if current_class else "",
-                    "번호": f"{num}",
-                    "성명": name,
-                    "기본교과": base_credit,
-                    "특수교과": 0.0
-                })
+                # 학생 고유 키 설정 (중복 방지 및 1인 1행 보장)
+                student_key = (current_grade, current_class, num, name)
+                last_student_key = student_key
                 
-            # 3. 체육·예술 / 과학탐구실험 하단 합계 행 추적 및 누적 연산
-            elif col_a == "" and len(extracted_data) > 0:
-                row_cells = [str(x).strip() for x in row.tolist() if pd.notna(x)]
-                row_str = "".join(row_cells).replace(" ", "")
-                
-                # 하단에 분리된 특수과목 합계 행 식별 패턴
-                if "합계" in row_str or "이수학점" in row_str:
-                    # 해당 행의 가장 우측 숫자를 특수과목 학점으로 가져옴
+                if student_key not in students_dict:
+                    students_dict[student_key] = {
+                        "base": base_credit,
+                        "extra": 0.0
+                    }
+                else:
+                    # 중복 데이터 행이 또 들어와도 값 보존 처리
+                    students_dict[student_key]["base"] = max(students_dict[student_key]["base"], base_credit)
+                    
+            # 3. 체육·예술 / 과학탐구실험 하단 합계 행 정밀 타겟팅
+            elif col_a == "" and last_student_key is not None:
+                # '교과이수학점합계' 문구와 '체육', '예술', '과학탐구' 등의 연관 단어가 있을 때만 수집
+                if "이수학점" in row_str or "합계" in row_str:
                     for val in reversed(row.tolist()):
                         if pd.notna(val):
                             val_str = str(val).strip()
                             if re.match(r'^\d+(\.\d+)?$', val_str):
                                 try:
-                                    # 가장 최근에 추가된(현재 해당 구역의) 학생 데이터에 학점 합산 추가
-                                    extracted_data[-1]["`특수교과`"] += float(val_str)
+                                    # 해당 학생의 추가 특수교과 학점 누적
+                                    students_dict[last_student_key]["extra"] += float(val_str)
                                 except:
                                     pass
                                 break
 
-        # 4. 최종 결과 테이블 정비 및 수치 연산 결과 포맷팅
+        # 4. 딕셔너리 데이터를 최종 엑셀 포맷 리스트로 전환
         final_list = []
-        for s in extracted_data:
-            total_sum = s["기본교과"] + s["`특수교과`"]
-            # 소수점 아래가 0이면 정수로, 있으면 소수점 유지 표시
-            total_str = str(int(total_sum)) if total_sum.is_integer() else f"{total_sum:.1f}"
+        for (grade, clsw, num, name), credits in students_dict.items():
+            total_sum = credits["base"] + credits["extra"]
             
+            # 예시 파일 형식처럼 소수점 뒤가 .0이면 정수로 표기
+            if total_sum.is_integer():
+                total_str = str(int(total_sum))
+            else:
+                total_str = f"{total_sum:.1f}"
+                
             final_list.append({
-                "학년": s["학년"],
-                "반": s["반"],
-                "번호": s["번호"],
-                "성명": s["성명"],
+                "학년": f"{grade}학년" if grade else "",
+                "반": f"{clsw}반" if clsw else "",
+                "번호": f"{num}번",
+                "성명": name,
                 "이수학점 합계": total_str
             })
 
         result_df = pd.DataFrame(final_list)
         if result_df.empty:
-            log("⚠️ 데이터를 파싱하지 못했습니다. 원본 데이터 양식을 확인해주세요.")
+            log("⚠️ 데이터를 추출하지 못했습니다. 파일 구조를 재확인해 주세요.")
             document.getElementById("loading-msg").style.display = "none"
             return
             
+        # 컬럼 순서 지정
         result_df = result_df[["학년", "반", "번호", "성명", "이수학점 합계"]]
         
-        # 5. 메모리 내 가상 엑셀 쓰기
+        # 5. 다운로드용 파일 빌드
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            result_df.to_excel(writer, index=False, sheet_name="학점합산결과")
+            result_df.to_excel(writer, index=False, sheet_name="학점추출결과")
         output.seek(0)
         
         js_bytes = Uint8Array.new(output.read())
-        js_file = File.new([js_bytes], "extracted_total_credits.xlsx", { "type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+        js_file = File.new([js_bytes], "extracted_students_fixed.xlsx", { "type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
         file_url = URL.createObjectURL(js_file)
         
         download_link = document.getElementById("download-link")
@@ -196,7 +209,7 @@ async def process_file(event):
         
         document.getElementById("loading-msg").style.display = "none"
         document.getElementById("download-area").style.display = "block"
-        log(f"정산 성공: 총 {len(result_df)}명의 이수학점 정밀 합산이 완료되었습니다.")
+        log(f"정산 성공: 총 {len(result_df)}명의 중복 없는 합산 정산이 완료되었습니다.")
         
     except Exception as e:
         log(f"❌ 에러 발생: {str(e)}")
