@@ -14,10 +14,7 @@
         h2 { color: #1e3a8a; margin-top: 0; margin-bottom: 5px; }
         .developer-credit { text-align: right; font-size: 0.85rem; color: #64748b; margin-bottom: 15px; font-style: italic; font-weight: 500; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
         
-        /* 정보 박스 스타일 */
         .info-box { background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 15px; margin-bottom: 15px; border-radius: 0 8px 8px 0; font-size: 0.95rem; line-height: 1.6; }
-        
-        /* 매뉴얼 박스 스타일 */
         .manual-box { background-color: #f8fafc; border-left: 4px solid #10b981; padding: 15px; margin-bottom: 20px; border-radius: 0 8px 8px 0; font-size: 0.95rem; line-height: 1.6; }
         .neis-path { display: inline-block; background-color: #e2e8f0; padding: 8px 12px; border-radius: 6px; font-weight: bold; color: #334155; margin-top: 8px; font-size: 0.9rem; letter-spacing: -0.5px;}
         
@@ -72,9 +69,13 @@
 import asyncio
 import io
 import re
+import warnings
 import pandas as pd
 from js import document, Uint8Array, File, URL
 from pyodide.ffi import create_proxy
+
+# 엑셀 스타일 경고문 무시 설정
+warnings.filterwarnings('ignore')
 
 def log(message):
     log_box = document.getElementById("status-log")
@@ -140,7 +141,7 @@ async def process_file(event):
                 num = col_a
                 name = ""
                 
-                # 성명 탐색 (이 줄에서는 학점을 찾지 않습니다!)
+                # 성명 탐색
                 for c_idx in range(1, min(5, len(row))):
                     if pd.notna(row[c_idx]):
                         val = str(row[c_idx]).strip()
@@ -183,6 +184,7 @@ async def process_file(event):
         if result_df.empty:
             log("⚠️ 데이터를 정산하지 못했습니다. 파일 구조를 확인해 주세요.")
             document.getElementById("loading-msg").style.display = "none"
+            event.target.value = "" # 업로드 창 초기화
             return
             
         result_df = result_df[["학년", "반", "번호", "성명", "이수학점 합계"]]
@@ -202,11 +204,15 @@ async def process_file(event):
         
         document.getElementById("loading-msg").style.display = "none"
         document.getElementById("download-area").style.display = "block"
-        log(f"정산 완료: 총 {len(result_df)}명의 학점이 G열 기준으로 완벽히 결산되었습니다.")
+        log(f"정산 완료: 총 {len(result_df)}명의 학점이 정상적으로 결산되었습니다.")
         
     except Exception as e:
         log(f"❌ 에러 발생: {str(e)}")
         document.getElementById("loading-msg").style.display = "none"
+        
+    finally:
+        # 연속 추출을 위해 파일 선택창 초기화
+        event.target.value = ""
 
 file_input = document.getElementById("excel-file")
 event_proxy = create_proxy(process_file)
