@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>로컬 데이터 추출 툴 (보안 안전)</title>
+    
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+    
+    <style>
+        body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; background-color: #f5f7fb; color: #333; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { color: #1e3a8a; margin-top: 0; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
+        .info-box { background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 15px; margin-bottom: 20px; border-radius: 0 8px 8px 0; font-size: 0.95rem; line-height: 1.6; }
+        .file-input-wrapper { margin: 20px 0; padding: 20px; border: 2px dashed #cbd5e1; border-radius: 8px; text-align: center; background-color: #fafafa; }
+        input[type="file"] { display: none; }
+        .custom-file-upload { display: inline-block; padding: 10px 20px; background-color: #2563eb; color: white; border-radius: 6px; cursor: pointer; font-weight: bold; transition: background 0.2s; }
+        .custom-file-upload:hover { background-color: #1d4ed8; }
+        #file-name { margin-top: 10px; font-size: 0.9rem; color: #64748b; font-style: italic; }
+        #loading-msg { display: none; color: #d97706; font-weight: bold; margin: 10px 0; }
+        #download-area { margin-top: 20px; text-align: center; display: none; }
+        .btn-download { display: inline-block; padding: 12px 25px; background-color: #16a34a; color: white; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 1.1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .btn-download:hover { background-color: #15803d; }
+        #status-log { margin-top: 20px; padding: 15px; background: #1e293b; color: #38bdf8; border-radius: 6px; font-family: monospace; font-size: 0.85rem; max-height: 150px; overflow-y: auto; white-space: pre-wrap; }
+    </style>
+
+    <py-config>
+        packages = ["pandas", "openpyxl"]
+    </py-config>
+</head>
+<body>
+
+<div class="container">
+    <h2>🔒 로컬 학생 데이터 추출 시스템</h2>
+    
+    <div class="info-box">
+        <strong>💡 보안 안내:</strong> 본 프로그램은 100% 사용자의 <strong>웹 브라우저 메모리 내부에서만 작동</strong>합니다. 업로드하신 학점 및 개인정보 파일은 외부 서버로 절대 전송되지 않으므로 안심하고 사용하셔도 됩니다.
+    </div>
+
+    <div class="file-input-wrapper">
+        <label for="excel-file" class="custom-file-upload">📁 엑셀 파일(.xlsx) 선택</label>
+        <input type="file" id="excel-file" accept=".xlsx" />
+        <div id="file-name">선택된 파일 없음</div>
+    </div>
+
+    <div id="loading-msg">⏳ 브라우저 내부에서 파이썬 엔진 및 데이터를 처리 중입니다. 잠시만 기다려 주세요...</div>
+
+    <div id="download-area">
+        <p style="color: #16a34a; font-weight: bold; font-size: 1.1rem;">✨ 데이터 추출이 완료되었습니다!</p>
+        <a id="download-link" class="btn-download" href="#" download="추출_학생이수학점.xlsx">📥 추출된 엑셀 다운로드</a>
+    </div>
+
+    <h4 style="margin-bottom: 5px; color: #475569;">⚙️ 시스템 로그</h4>
+    <div id="status-log">시스템 준비 중... (최초 구동 시 약 10~2
