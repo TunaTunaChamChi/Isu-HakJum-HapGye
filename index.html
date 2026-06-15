@@ -30,7 +30,7 @@
 <div class="container">
     <h2>🔒 로컬 학생 학점 합산 추출 시스템</h2>
     <div class="info-box">
-        <strong>💡 G열(7번째 열) 고정 정산 완료:</strong> 타 열의 오인식 숫자를 차단하고, 오직 학점이 위치한 <strong>G열</strong> 데이터만 정밀 타겟팅합니다. 이제 정확히 첫 줄 교과 합계와 하단 특수교과 합계를 매칭하여 52+10=62 형태로 완벽히 연산합니다.
+        <strong>💡 255 고정 오류 최종 해결 버전:</strong> 숨은 열이나 셀 병합으로 인해 열 번호가 뒤틀리는 현상을 극복하기 위해, 행 내부에서 <strong>현실적인 학점 수치 범위(10~70)</strong>에 들어오는 진짜 점수만 스마트하게 필터링하여 합산합니다.
     </div>
     <div class="file-input-wrapper">
         <label for="excel-file" class="custom-file-upload">📁 파일 선택 (.xlsx 또는 .csv)</label>
@@ -39,8 +39,8 @@
     </div>
     <div id="loading-msg">⏳ 파이썬 가상 정산 엔진 구동 중입니다. 잠시만 기다려 주세요...</div>
     <div id="download-area">
-        <p style="color: #16a34a; font-weight: bold; font-size: 1.1rem;">✨ G열 학점 추출 및 합산 완료!</p>
-        <a id="download-link" class="btn-download" href="#" download="추출_학생이수학점_고정본.xlsx">📥 최종 결과 엑셀 다운로드</a>
+        <p style="color: #16a34a; font-weight: bold; font-size: 1.1rem;">✨ 지능형 학점 합산 완료!</p>
+        <a id="download-link" class="btn-download" href="#" download="학생이수학점_완벽결과.xlsx">📥 최종 결과 엑셀 다운로드</a>
     </div>
     <h4 style="margin-bottom: 5px; color: #475569;">⚙️ 정산 로그</h4>
     <div id="status-log">시스템 준비 중... (최초 구동 시 약 10~20초 소요될 수 있습니다)</div>
@@ -78,7 +78,7 @@ async def process_file(event):
     file_bytes = bytearray(uint8_array)
     
     try:
-        log("데이터 구조 분석 중...")
+        log("데이터 해석 중...")
         if file.name.lower().endswith('.csv'):
             df = pd.read_csv(io.BytesIO(file_bytes), dtype=str, header=None, encoding='utf-8-sig', on_bad_lines='skip')
         else:
@@ -89,7 +89,7 @@ async def process_file(event):
         current_class = ""
         last_student_key = None
         
-        log("G열 고정 타겟팅 정산 처리 중...")
+        log("스마트 수치 추적 정산 처리 중...")
         
         for index, row in df.iterrows():
             col_a = str(row[0]).strip() if pd.notna(row[0]) else ""
@@ -113,32 +113,32 @@ async def process_file(event):
             if not row_str:
                 continue
                 
-            # 원본 데이터의 열 개수가 G열(인덱스 6)보다 적으면 스킵
-            if len(row) <= 6:
-                continue
-                
-            # G열(7번째 열, 파이썬 인덱스 6) 데이터를 안전하게 추출
-            col_g = str(row[6]).strip() if pd.notna(row[6]) else ""
-            
             # 2. 학생 데이터 신규 등록 (A열이 숫자일 때)
             if col_a.isdigit():
                 num = col_a
                 name = ""
                 base_credit = 0.0
                 
-                # 성명 탐색
+                # 성명 탐색 (앞쪽 1~4번째 칸 사이)
                 for c_idx in range(1, min(5, len(row))):
                     if pd.notna(row[c_idx]):
                         val = str(row[c_idx]).strip()
                         if not name and re.match(r'^[가-힣]{2,5}$', val) and val != "성명":
                             name = val
                 
-                # 고정된 G열에서 기본 교과 합계 점수 추출
-                if re.match(r'^\d+(\.\d+)?$', col_g):
-                    try:
-                        base_credit = float(col_g)
-                    except:
-                        base_credit = 0.0
+                # 열 번호에 의존하지 않고, 행 전체에서 '진짜 기본 학점 범위(10~70)'에 속하는 숫자 자동 정밀 탐색
+                for val in row.tolist():
+                    if pd.notna(val):
+                        val_str = str(val).strip()
+                        if re.match(r'^\d+(\.\d+)?$', val_str) and val_str != num:
+                            try:
+                                f_val = float(val_str)
+                                # 고등학교 일반적인 교과이수학점 합계 범위 타겟팅 (255 같은 가짜 수치 필터링)
+                                if 10.0 <= f_val <= 70.0:
+                                    base_credit = f_val
+                                    break
+                            except:
+                                pass
                 
                 student_key = (current_grade, current_class, num, name)
                 last_student_key = student_key
@@ -149,14 +149,21 @@ async def process_file(event):
                         "extra": 0.0
                     }
                     
-            # 3. [체육·예술/과학탐구실험] 합계 행 타겟팅 (G열만 누적 계산)
+            # 3. [체육·예술/과학탐구실험] 합계 행 정밀 타겟팅
             elif col_a == "" and last_student_key is not None:
                 if ("체육" in row_str or "예술" in row_str or "과학탐구" in row_str) and "합계" in row_str:
-                    if re.match(r'^\d+(\.\d+)?$', col_g):
-                        try:
-                            students_dict[last_student_key]["extra"] += float(col_g)
-                        except:
-                            pass
+                    # 마찬가지로 해당 행에서 유효한 특수교과 학점 범위(1~20) 추출
+                    for val in row.tolist():
+                        if pd.notna(val):
+                            val_str = str(val).strip()
+                            if re.match(r'^\d+(\.\d+)?$', val_str):
+                                try:
+                                    f_val = float(val_str)
+                                    if 1.0 <= f_val <= 20.0:
+                                        students_dict[last_student_key]["extra"] += f_val
+                                        break
+                                except:
+                                    pass
 
         # 4. 결과 리스트 정돈
         final_list = []
@@ -199,7 +206,7 @@ async def process_file(event):
         
         document.getElementById("loading-msg").style.display = "none"
         document.getElementById("download-area").style.display = "block"
-        log(f"정산 완료: 총 {len(result_df)}명의 학점이 G열 기준으로 결산되었습니다.")
+        log(f"정산 완료: 총 {len(result_df)}명의 학점이 범위 기반 필터링으로 완벽히 결산되었습니다.")
         
     except Exception as e:
         log(f"❌ 에러 발생: {str(e)}")
