@@ -152,11 +152,11 @@ async def process_file(event):
                     num = col_a
                     name = ""
                     
-                    for c_idx in range(1, min(5, len(row))):
-                        if pd.notna(row[c_idx]):
-                            val = str(row[c_idx]).strip()
-                            if not name and re.match(r'^[가-힣]{2,5}$', val) and val != "성명":
-                                name = val
+                    # 🌟 수정된 부분: B열(인덱스 1)에서 무조건 이름 추출 (로마자 포함)
+                    if len(row) > 1 and pd.notna(row[1]):
+                        val_b = str(row[1]).strip()
+                        if val_b != "성명" and val_b != "":
+                            name = val_b
                     
                     student_key = (current_grade, current_class, num, name)
                     last_student_key = student_key
@@ -213,7 +213,7 @@ async def process_file(event):
         
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            result_df.to_excel(writer, index=False, sheet_name="통합학점추출결과")
+            result_df.to_excel(writer, index=False, sheet_name="학점계산결과")
         output.seek(0)
         
         js_bytes = Uint8Array.new(output.read())
