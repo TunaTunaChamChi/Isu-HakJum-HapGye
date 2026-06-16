@@ -6,7 +6,7 @@
     <title>학점 합산기</title>
     <meta property="og:type" content="website" />
     <meta property="og:title" content="학점 합산기 by 이시온" />
-    <meta property="og:description" content="NEIS 학생부 교과학습발달상황 엑셀 업로드 및 학점 정밀 합산 도구 (100% 로컬 보안 작동)" />
+    <meta property="og:description" content="NEIS 학생부 교과학습발달상황 엑셀 업로드 및 학점 합산기 (100% 로컬 처리)" />
     <meta property="og:image" content="favicon.png" />
     <link rel="icon" type="image/png" href="favicon.png" />
     
@@ -45,7 +45,7 @@
     
     <div class="manual-box">
         <strong>📖 활용 매뉴얼 (NEIS 데이터 준비)</strong><br>
-        나이스에 접속하신 후, 아래 경로에서 다운로드한 엑셀 파일을 변환 없이 그대로 업로드해 주세요.<br>
+        나이스에 접속하신 후, 아래 경로에서 다운로드한 엑셀 파일을 변환 없이 그대로 업로드해 주세요.(여러 파일 동시 업로드 가능)<br>
         <div class="neis-path">학교생활기록부 &gt; 학생부 항목별 조회 &gt; 교과학습발달상황 &gt; 교과학습발달상황 &gt; <strong>XLS data로 저장</strong></div>
     </div>
 
@@ -54,16 +54,16 @@
     </div>
     
     <div class="file-input-wrapper">
-        <label for="excel-file" class="custom-file-upload">📁 엑셀 파일(.xls, .xlsx) 선택</label>
-        <input type="file" id="excel-file" accept=".xls, .xlsx, .csv" />
+        <label for="excel-file" class="custom-file-upload">📁 엑셀 파일 선택 (여러 개 동시 선택 가능)</label>
+        <input type="file" id="excel-file" accept=".xls, .xlsx, .csv" multiple />
         <div id="file-name">선택된 파일 없음</div>
     </div>
     
-    <div id="loading-msg">⏳ 파이썬 정산 엔진이 구동 중입니다. 잠시만 기다려 주세요...</div>
+    <div id="loading-msg">⏳ 파이썬 계산 엔진이 구동 중입니다. 잠시만 기다려 주세요...</div>
     
     <div id="download-area">
-        <p style="color: #16a34a; font-weight: bold; font-size: 1.1rem;">✨ 학생별 학점 합산이 완료되었습니다!</p>
-        <a id="download-link" class="btn-download" href="#" download="추출_학생이수학점.xlsx">📥 결과 엑셀 파일 다운로드</a>
+        <p style="color: #16a34a; font-weight: bold; font-size: 1.1rem;">✨ 모든 파일의 학생별 학점 통합 합산이 완료되었습니다!</p>
+        <a id="download-link" class="btn-download" href="#" download="통합_학생이수학점.xlsx">📥 통합 결과 엑셀 파일 다운로드</a>
     </div>
     
     <h4 style="margin-bottom: 5px; color: #475569;">⚙️ 시스템 로그</h4>
@@ -79,7 +79,6 @@ import pandas as pd
 from js import document, Uint8Array, File, URL
 from pyodide.ffi import create_proxy
 
-# 엑셀 스타일 경고문 무시 설정
 warnings.filterwarnings('ignore')
 
 def log(message):
@@ -94,84 +93,102 @@ async def process_file(event):
     document.getElementById("download-area").style.display = "none"
     
     file_list = event.target.files
-    if len(file_list) == 0:
+    num_files = len(file_list)
+    
+    if num_files == 0:
         return
+        
+    # UI에 선택된 파일 개수 표시
+    if num_files == 1:
+        document.getElementById("file-name").innerText = file_list.item(0).name
+    else:
+        document.getElementById("file-name").innerText = f"총 {num_files}개의 파일 선택됨"
+        
+    log(f"--- 총 {num_files}개의 파일 병합 및 분석을 시작합니다 ---")
     
-    file = file_list.item(0)
-    document.getElementById("file-name").innerText = file.name
-    log(f"파일 로드 완료: {file.name}")
-    
-    array_buffer = await file.arrayBuffer()
-    uint8_array = Uint8Array.new(array_buffer)
-    file_bytes = bytearray(uint8_array)
+    students_dict = {}
     
     try:
-        log("데이터 구조 분석 중...")
-        if file.name.lower().endswith('.csv'):
-            df = pd.read_csv(io.BytesIO(file_bytes), dtype=str, header=None, encoding='utf-8-sig', on_bad_lines='skip')
-        else:
-            df = pd.read_excel(io.BytesIO(file_bytes), dtype=str, header=None)
-        
-        students_dict = {}
-        current_grade = ""
-        current_class = ""
-        last_student_key = None
-        
-        log("오직 [이수학점합계] 행의 G열 타겟팅 중...")
-        
-        for index, row in df.iterrows():
-            col_a = str(row[0]).strip() if pd.notna(row[0]) else ""
+        # 업로드된 모든 파일을 순회하며 데이터 하나로 병합
+        for file_idx in range(num_files):
+            file = file_list.item(file_idx)
+            log(f"[{file_idx + 1}/{num_files}] 파일 로드 및 분석 중: {file.name}")
             
-            # 1. 학년/반 파악
-            if "학년" in col_a and "반" in col_a:
-                match = re.search(r'(\d+)\s*학년\s*(\d+)\s*반', col_a)
-                if match:
-                    current_grade = match.group(1)
-                    current_class = match.group(2)
-                continue
-            elif re.match(r'^\d+[-]\d+$', col_a):
-                parts = col_a.split('-')
-                current_grade = parts[0]
-                current_class = parts[1]
-                continue
+            array_buffer = await file.arrayBuffer()
+            uint8_array = Uint8Array.new(array_buffer)
+            file_bytes = bytearray(uint8_array)
             
-            row_cells = [str(x).strip() for x in row.tolist() if pd.notna(x)]
-            row_str = "".join(row_cells).replace(" ", "")
+            if file.name.lower().endswith('.csv'):
+                df = pd.read_csv(io.BytesIO(file_bytes), dtype=str, header=None, encoding='utf-8-sig', on_bad_lines='skip')
+            else:
+                df = pd.read_excel(io.BytesIO(file_bytes), dtype=str, header=None)
             
-            if not row_str:
-                continue
+            current_grade = ""
+            current_class = ""
+            last_student_key = None
+            
+            for index, row in df.iterrows():
+                col_a = str(row[0]).strip() if pd.notna(row[0]) else ""
                 
-            # 2. 학생 데이터 신규 등록 (A열이 숫자일 때)
-            if col_a.isdigit():
-                num = col_a
-                name = ""
+                if "학년" in col_a and "반" in col_a:
+                    match = re.search(r'(\d+)\s*학년\s*(\d+)\s*반', col_a)
+                    if match:
+                        current_grade = match.group(1)
+                        current_class = match.group(2)
+                    continue
+                elif re.match(r'^\d+[-]\d+$', col_a):
+                    parts = col_a.split('-')
+                    current_grade = parts[0]
+                    current_class = parts[1]
+                    continue
                 
-                # 성명 탐색
-                for c_idx in range(1, min(5, len(row))):
-                    if pd.notna(row[c_idx]):
-                        val = str(row[c_idx]).strip()
-                        if not name and re.match(r'^[가-힣]{2,5}$', val) and val != "성명":
-                            name = val
+                row_cells = [str(x).strip() for x in row.tolist() if pd.notna(x)]
+                row_str = "".join(row_cells).replace(" ", "")
                 
-                student_key = (current_grade, current_class, num, name)
-                last_student_key = student_key
-                
-                # 새 학생 등장 시 초기화
-                if student_key not in students_dict:
-                    students_dict[student_key] = 0.0
+                if not row_str:
+                    continue
                     
-            # 3. 오직 "이수학점합계" 글자가 포함된 행에서만 G열 값 누적
-            elif last_student_key is not None:
-                if "이수학점합계" in row_str:
-                    if len(row) > 6:
-                        col_g = str(row[6]).strip() if pd.notna(row[6]) else ""
+                if col_a.isdigit():
+                    num = col_a
+                    name = ""
+                    
+                    for c_idx in range(1, min(5, len(row))):
+                        if pd.notna(row[c_idx]):
+                            val = str(row[c_idx]).strip()
+                            if not name and re.match(r'^[가-힣]{2,5}$', val) and val != "성명":
+                                name = val
+                    
+                    student_key = (current_grade, current_class, num, name)
+                    last_student_key = student_key
+                    
+                    # 새로운 파일에서 새로운 학생이 나오면 딕셔너리에 추가
+                    if student_key not in students_dict:
+                        students_dict[student_key] = 0.0
                         
-                        if re.match(r'^\d+(\.\d+)?$', col_g):
-                            students_dict[last_student_key] += float(col_g)
+                elif last_student_key is not None:
+                    if "이수학점합계" in row_str:
+                        if len(row) > 6:
+                            col_g = str(row[6]).strip() if pd.notna(row[6]) else ""
+                            
+                            if re.match(r'^\d+(\.\d+)?$', col_g):
+                                students_dict[last_student_key] += float(col_g)
 
-        # 4. 결과 리스트 정돈
+        # 모든 파일 처리 후, 학년 -> 반 -> 번호 순으로 깔끔하게 정렬하기 위한 키 함수
+        def sort_key(item):
+            grade_str, class_str, num_str, name = item[0]
+            try: g_int = int(grade_str)
+            except: g_int = 999
+            try: c_int = int(class_str)
+            except: c_int = 999
+            try: n_int = int(num_str)
+            except: n_int = 999
+            return (g_int, c_int, n_int)
+
+        # 정렬 수행
+        sorted_students = sorted(students_dict.items(), key=sort_key)
+
         final_list = []
-        for (grade, clsw, num, name), total_sum in students_dict.items():
+        for (grade, clsw, num, name), total_sum in sorted_students:
             if total_sum.is_integer():
                 total_str = str(int(total_sum))
             else:
@@ -187,21 +204,20 @@ async def process_file(event):
 
         result_df = pd.DataFrame(final_list)
         if result_df.empty:
-            log("⚠️ 데이터를 정산하지 못했습니다. 파일 구조를 확인해 주세요.")
+            log("⚠️ 데이터를 처리하지 못했습니다. 파일 구조를 확인해 주세요.")
             document.getElementById("loading-msg").style.display = "none"
-            event.target.value = "" # 업로드 창 초기화
+            event.target.value = "" 
             return
             
         result_df = result_df[["학년", "반", "번호", "성명", "이수학점 합계"]]
         
-        # 5. 가상 엑셀 출력 및 다운로드 연동
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            result_df.to_excel(writer, index=False, sheet_name="학점추출결과")
+            result_df.to_excel(writer, index=False, sheet_name="학점계산결과")
         output.seek(0)
         
         js_bytes = Uint8Array.new(output.read())
-        js_file = File.new([js_bytes], "추출_학생이수학점.xlsx", { "type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+        js_file = File.new([js_bytes], "통합_학생이수학점.xlsx", { "type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
         file_url = URL.createObjectURL(js_file)
         
         download_link = document.getElementById("download-link")
@@ -209,14 +225,13 @@ async def process_file(event):
         
         document.getElementById("loading-msg").style.display = "none"
         document.getElementById("download-area").style.display = "block"
-        log(f"정산 완료: 총 {len(result_df)}명의 학점이 정상적으로 결산되었습니다.")
+        log(f"✅ 정산 완료: 총 {num_files}개의 파일에서 {len(result_df)}명의 학점이 성공적으로 계산되었습니다.")
         
     except Exception as e:
         log(f"❌ 에러 발생: {str(e)}")
         document.getElementById("loading-msg").style.display = "none"
         
     finally:
-        # 연속 추출을 위해 파일 선택창 초기화
         event.target.value = ""
 
 file_input = document.getElementById("excel-file")
