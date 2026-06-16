@@ -6,7 +6,7 @@
     <title>학점 합산기</title>
     <meta property="og:type" content="website" />
     <meta property="og:title" content="학점 합산기 by 이시온" />
-    <meta property="og:description" content="NEIS 학생부 교과학습발달상황 엑셀 업로드 및 학점 합산기 (100% 로컬 처리)" />
+    <meta property="og:description" content="NEIS 학생부 교과학습발달상황 엑셀 업로드 및 학점 정밀 합산 도구 (100% 로컬 보안 작동)" />
     <meta property="og:image" content="favicon.png" />
     <link rel="icon" type="image/png" href="favicon.png" />
     
@@ -34,8 +34,9 @@
         .btn-download:hover { background-color: #15803d; }
         #status-log { margin-top: 20px; padding: 15px; background: #1e293b; color: #38bdf8; border-radius: 6px; font-family: monospace; font-size: 0.85rem; max-height: 200px; overflow-y: auto; white-space: pre-wrap; }
     </style>
+    
     <py-config>
-        packages = ["pandas", "openpyxl"]
+        packages = ["pandas", "openpyxl", "xlrd"]
     </py-config>
 </head>
 <body>
